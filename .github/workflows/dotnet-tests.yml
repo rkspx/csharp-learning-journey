@@ -1,0 +1,30 @@
+name: .NET tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore labs/day-03/CaseLifecycle.Tests/CaseLifecycle.Tests.csproj
+
+      - name: Build
+        run: dotnet build labs/day-03/CaseLifecycle.Tests/CaseLifecycle.Tests.csproj --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test labs/day-03/CaseLifecycle.Tests/CaseLifecycle.Tests.csproj --configuration Release --no-build
