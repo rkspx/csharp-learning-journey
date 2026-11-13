@@ -1,0 +1,12 @@
+{
+  "id": "demo-001",
+  "timestamp": "2026-11-12T01:00:00Z",
+  "agent": {
+    "id": "001"
+  },
+  "rule": {
+    "id": "100001",
+    "level": 0,
+    "description": "Synthetic authentication failure"
+  }
+}

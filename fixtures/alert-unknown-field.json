@@ -1,0 +1,14 @@
+{
+  "id": "demo-001",
+  "timestamp": "2026-11-12T01:00:00Z",
+  "agent": {
+    "id": "001",
+    "name": "lab-server"
+  },
+  "rule": {
+    "id": "100001",
+    "level": 10,
+    "description": "Synthetic authentication failure"
+  },
+  "location": "lab"
+}
