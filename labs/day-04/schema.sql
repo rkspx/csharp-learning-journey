@@ -1,0 +1,5 @@
+CREATE TABLE cases (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'New',
+);
