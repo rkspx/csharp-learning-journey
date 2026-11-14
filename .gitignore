@@ -31,3 +31,7 @@ coverage/
 ._*
 Thumbs.db
 Desktop.ini
+
+
+*.db
+*.db-*
