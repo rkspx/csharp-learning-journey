@@ -35,3 +35,7 @@ Desktop.ini
 
 *.db
 *.db-*
+
+.env
+.env.*
+!.env.example
