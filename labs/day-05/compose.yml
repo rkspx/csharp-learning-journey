@@ -1,0 +1,19 @@
+name: wazuh-day05
+services:
+  postgres:
+    image: postgres:18.7
+    environment:
+      POSTGRES_USER: learner
+      POSTGRES_PASSWORD: local-learning-only
+      POSTGRES_DB: case_learning
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U learner -d case_learning"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  postgres_data:
