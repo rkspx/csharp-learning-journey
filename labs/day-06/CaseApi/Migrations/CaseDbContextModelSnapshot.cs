@@ -27,6 +27,10 @@ namespace CaseApi.Migrations
                         .HasColumnType("text")
                         .HasColumnName("id");
 
+                    b.Property<string>("AssignedTo")
+                        .HasColumnType("text")
+                        .HasColumnName("assigned_to");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

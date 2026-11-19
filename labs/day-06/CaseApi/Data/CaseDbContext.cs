@@ -29,6 +29,10 @@ public class CaseDbContext: DbContext
             .IsRequired() // NOT NULL
             .HasDefaultValue("New"); // DEFAULT 'New'
 
+        cases.Property(c => c.AssignedTo)
+            .HasColumnName("assigned_to")
+            .IsRequired(false);
+
 
         cases.ToTable("cases", table =>
         {
