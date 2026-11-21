@@ -34,9 +34,9 @@ app.MapGet("/cases", async (CaseDbContext db) =>
     return Results.Ok(cases);
 });
 
-app.MapPost("/cases", async(CreateCaseRequest request, CaseDbContext db) =>
+app.MapPost("/cases", async(CreateCaseRequest? request, CaseDbContext db) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Title))
+    if (string.IsNullOrWhiteSpace(request?.Title))
     {
         return Results.BadRequest(new
         {
