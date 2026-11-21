@@ -11,7 +11,7 @@ namespace CaseApi.Tests;
 
 public class DatabaseTests
 {
-
+    private string _dbName = "case_api_tests";
     [Fact]
     public async Task TestDatabase_AppliesCaseMigrations()
     {
@@ -19,7 +19,7 @@ public class DatabaseTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
-        Assert.Equal("case_api_tests", db.Database.GetDbConnection().Database);
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
         var applied = await db.Database.GetAppliedMigrationsAsync();
         Assert.Contains("20261119073210_InitialCreate", applied);
@@ -33,7 +33,7 @@ public class DatabaseTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
-        Assert.Equal("case_api_tests", db.Database.GetDbConnection().Database);
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
         using var client = factory.CreateClient();
         string title = $"Repeated login failures {Guid.NewGuid()}";
@@ -71,7 +71,7 @@ public class DatabaseTests
         using  var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
-        Assert.Equal("case_api_tests", db.Database.GetDbConnection().Database);
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
 
         using var client = factory.CreateClient();
@@ -89,7 +89,7 @@ public class DatabaseTests
 
         var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
-        Assert.Equal("case_api_tests", db.Database.GetDbConnection().Database);
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
 
         using var client = factory.CreateClient();
@@ -109,7 +109,7 @@ public class DatabaseTests
         using var scope = factory.Services.CreateScope();
 
         var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-        Assert.Equal("case_api_tests", db.Database.GetDbConnection().Database);
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
 
         using var client = factory.CreateClient();
@@ -128,7 +128,7 @@ public class DatabaseTests
         using var scope = factory.Services.CreateScope();
 
         var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-        Assert.Equal("case_api_tests", db.Database.GetDbConnection().Database);
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
 
         using var client = factory.CreateClient();
@@ -158,7 +158,7 @@ public class DatabaseTests
         using var scope = factory.Services.CreateScope();
 
         var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-        Assert.Equal("case_api_tests", db.Database.GetDbConnection().Database);
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
 
         using var client = factory.CreateClient();
@@ -167,5 +167,50 @@ public class DatabaseTests
 
         JsonElement body = await get.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("Invalid pagination parameter", body.GetProperty("error").ToString());
+    }
+
+    [Fact]
+    public async Task GetCases_PageTwoWithSizeTwo_ReturnsOnlyThirdCase()
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
+
+        string[] fixtureIds = ["case-001", "case-002", "case-003"];
+        try
+        {
+            db.Cases.AddRange(
+                new CaseEntity{ Id = fixtureIds[2], Title = "Third" },
+                new CaseEntity{ Id = fixtureIds[1], Title = "Second" },
+                new CaseEntity{ Id = fixtureIds[0], Title = "First" }
+            );
+
+            await db.SaveChangesAsync();
+
+            using var client = factory.CreateClient();
+            using var get = await client.GetAsync($"/cases?page=2&pageSize=2");
+            Assert.Equal(HttpStatusCode.OK, get.StatusCode);
+
+            CasesResponse? body = await get.Content.ReadFromJsonAsync<CasesResponse>();
+            Assert.NotNull(body);
+
+            Assert.Equal(2, body.Page);
+            Assert.Equal(2, body.PageSize);
+
+            var onlyCase = Assert.Single(body.Cases);
+            Assert.Equal("case-003", onlyCase.Id);
+            Assert.Equal("Third", onlyCase.Title);
+            Assert.Equal("New", onlyCase.Status);
+        }
+        finally
+        {
+            await db.Cases
+            .Where(c => fixtureIds.Contains(c.Id))
+            .ExecuteDeleteAsync();
+        }
+        
     }
 }
