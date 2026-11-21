@@ -22,16 +22,35 @@ app.MapGet("/cases/count", async (CaseDbContext db) =>
     return Results.Ok(new { count });
 });
 
-app.MapGet("/cases", async (CaseDbContext db) =>
+app.MapGet("/cases", async (CaseDbContext db, string? page, string? pageSize) =>
 {
+    int currentPage = 1;
+    int size = 20;
+     if ((
+            page is not null 
+            && !int.TryParse(page, out currentPage)) 
+        || (
+            pageSize is not null 
+            && !int.TryParse(pageSize, out size)) 
+        || currentPage < 1 
+        || size < 1 
+        || size > 100)
+    {
+        return Results.BadRequest(new { error = "Invalid pagination parameter" });
+    }
+
+    long offset = ((long) currentPage -1) * size;
+
     List<CaseResponse> cases = await db.Cases
     .OrderBy(c => c.Id)
-    .Select(c => new CaseResponse(
-        c.Id,
-        c.Title,
-        c.Status)).ToListAsync();
+    .Skip((int)offset)
+    .Take(size)
+    .Select(c => new CaseResponse(c.Id,c.Title,c.Status))
+    .ToListAsync();
 
-    return Results.Ok(cases);
+    CasesResponse response = new(cases, currentPage, size);
+
+    return Results.Ok(response);
 });
 
 app.MapPost("/cases", async(CreateCaseRequest? request, CaseDbContext db) =>
