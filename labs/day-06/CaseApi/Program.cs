@@ -79,3 +79,8 @@ app.MapGet("/cases/{id}", async (
 });
 
 app.Run();
+
+public partial class Program
+{
+    
+}
