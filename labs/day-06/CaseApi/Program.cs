@@ -13,7 +13,13 @@ builder.Services.AddDbContext<CaseDbContext>(options =>
     options.UseNpgsql(connectionString);
 });
 
+builder.Services.AddOpenApi();
 var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
 
 app.MapGet("/", () => "Hello World!");
 app.MapGet("/cases/count", async (CaseDbContext db) =>
@@ -55,7 +61,16 @@ app.MapGet("/cases", async (CaseDbContext db, string? page, string? pageSize) =>
     CasesResponse response = new(cases, currentPage, size);
 
     return Results.Ok(response);
-});
+})
+.WithSummary("List cases by ID")
+.WithDescription(
+    "Returns cases sorted by Id in ascending order. Page starts at 1 and defaults to 1. " +
+    "PageSize defaults to 20 and accepts values from 1 to 100. " +
+    "A valid page beyond the last case returns an empty cases array. " +
+    "Invalid pagination values or an offset above 2147483647 return 400."
+)
+.Produces<CaseResponse>(StatusCodes.Status200OK)
+.Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
 app.MapPost("/cases", async(CreateCaseRequest? request, CaseDbContext db) =>
 {
