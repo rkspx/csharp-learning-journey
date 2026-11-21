@@ -55,4 +55,26 @@ public class BasicEndpointTests
             body.GetProperty("error").GetString()
         );
     }
+
+    [Fact]
+    public async Task CreateCase_WithNullBody_returnsBadRequest()
+    {
+        using var factory = new WebApplicationFactory<Program>()
+        .WithWebHostBuilder(builder =>
+        {
+           builder.UseSetting(
+                "ConnectionString:CaseDatabase",
+                "Host=127.0.0.1;Port=1;Database=unused;Username=unused"
+            );
+        });
+
+        using var client = factory.CreateClient();
+        using var response = await client.PostAsync("/cases", content:null);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(
+            "Title is required",
+            body.GetProperty("error").GetString()
+        );
+    }
 }
