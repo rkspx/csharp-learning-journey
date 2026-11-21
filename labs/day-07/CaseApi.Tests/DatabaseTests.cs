@@ -151,6 +151,7 @@ public class DatabaseTests
     [InlineData("", "10")]
     [InlineData("1", "")]
     [InlineData("1", "null")]
+    [InlineData("1073741825", "5")]
     public async Task GetCases_WithInvalidPagination_ReturnsBadRequest(string page, string pageSize)
     {
         using var factory = new CaseApiFactory();

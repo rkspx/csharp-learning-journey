@@ -40,6 +40,10 @@ app.MapGet("/cases", async (CaseDbContext db, string? page, string? pageSize) =>
     }
 
     long offset = ((long) currentPage -1) * size;
+    if (offset > int.MaxValue)
+    {
+        return Results.BadRequest(new { error = "Invalid pagination parameter" });
+    }
 
     List<CaseResponse> cases = await db.Cases
     .OrderBy(c => c.Id)
