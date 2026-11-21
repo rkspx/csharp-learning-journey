@@ -96,7 +96,16 @@ app.MapPost("/cases", async(CreateCaseRequest? request, CaseDbContext db) =>
     );
 
     return Results.Created($"/cases/{entity.Id}", response);
-});
+})
+.WithSummary("Create a new case")
+.WithDescription(
+    "Send a JSON object with a title. Leading and trailing whitespace is trimmed. " +
+    "If the body or title is missing, or the title is null, empty, or whitespace-only, " +
+    "the API returns 400 with the error 'Title is required'. " +
+    "On success, the API returns 201 with the generated ID, trimmed title, and status 'New'. " +
+    "The Location response header contains the URL for retrieving the case.")
+.Produces<CaseResponse>(StatusCodes.Status201Created)
+.Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
 app.MapGet("/cases/{id}", async (
     string id, CaseDbContext db) =>
