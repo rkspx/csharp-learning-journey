@@ -17,7 +17,12 @@ builder.Services.AddDbContext<CaseDbContext>(options =>
 builder.Services.AddIdentityApiEndpoints<IdentityUser>()
     .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<CaseDbContext>();
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("CanCreateCase", policy =>
+        policy.RequireAuthenticatedUser()
+        .RequireRole("Analyst"));
+});
 
 builder.Services.AddOpenApi();
 
@@ -25,6 +30,8 @@ builder.Services.AddOpenApi();
 var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapGroup("/auth").MapIdentityApi<IdentityUser>();
 
 if (app.Environment.IsDevelopment())
 {
@@ -114,7 +121,8 @@ app.MapPost("/cases", async(CreateCaseRequest? request, CaseDbContext db) =>
     "the API returns 400 with the error 'Title is required'. " +
     "On success, the API returns 201 with the generated ID, trimmed title, and status 'New'. " +
     "The Location response header contains the URL for retrieving the case.")
-.RequireAuthorization()
+.RequireAuthorization("CanCreateCase")
+.Produces(StatusCodes.Status403Forbidden)
 .Produces(StatusCodes.Status401Unauthorized)
 .Produces<CaseResponse>(StatusCodes.Status201Created)
 .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
