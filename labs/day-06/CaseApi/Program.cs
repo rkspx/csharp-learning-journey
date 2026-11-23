@@ -1,6 +1,7 @@
 using CaseApi;
 using CaseApi.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 string connectionString = 
@@ -13,8 +14,17 @@ builder.Services.AddDbContext<CaseDbContext>(options =>
     options.UseNpgsql(connectionString);
 });
 
+builder.Services.AddIdentityApiEndpoints<IdentityUser>()
+    .AddRoles<IdentityRole>()
+    .AddEntityFrameworkStores<CaseDbContext>();
+builder.Services.AddAuthorization();
+
 builder.Services.AddOpenApi();
+
+
 var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
 {

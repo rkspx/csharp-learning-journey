@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace CaseApi.Data;
 
-public class CaseDbContext: DbContext
+public class CaseDbContext: IdentityDbContext<IdentityUser>
 {
     public CaseDbContext(DbContextOptions<CaseDbContext> options): base(options)
     {
