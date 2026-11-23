@@ -1,8 +1,10 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CaseApi;
 using CaseApi.Data;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -11,6 +13,46 @@ namespace CaseApi.Tests;
 
 public class DatabaseTests
 {
+    private static async Task SignInAsync(HttpClient client, IServiceProvider services, string role)
+    {
+        var roles = services.GetRequiredService<RoleManager<IdentityRole>>();
+        var users = services.GetRequiredService<UserManager<IdentityUser>>();
+
+        if (!await roles.RoleExistsAsync(role))
+        {
+            var result = await roles.CreateAsync(new IdentityRole(role));
+            Assert.True(result.Succeeded, string.Join("; ", result.Errors.Select(e => e.Description)));
+        }
+
+        string email = $"{role.ToLowerInvariant()}@example.text";
+        const string password = "Day9-Local-Test!42";
+        var user = await users.FindByEmailAsync(email);
+
+        if (user is null)
+        {
+            user = new IdentityUser { UserName = email, Email = email };
+            var result = await users.CreateAsync(user, password);
+            Assert.True(result.Succeeded, string.Join("; ", result.Errors.Select(e => e.Description)));            
+        }
+
+        if (!await users.IsInRoleAsync(user, role))
+        {
+            var result = await users.AddToRoleAsync(user, role);
+            Assert.True(result.Succeeded, string.Join("; ", result.Errors.Select(e => e.Description)));
+        }
+
+        using var login = await client.PostAsJsonAsync(
+            "/auth/login?useCookies=false",
+            new {email, password}
+        );
+
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var body = await login.Content.ReadFromJsonAsync<JsonElement>();
+        string? token = body.GetProperty("accessToken").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(token));
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+
     private string _dbName = "case_api_tests";
     [Fact]
     public async Task TestDatabase_AppliesCaseMigrations()
@@ -211,6 +253,40 @@ public class DatabaseTests
             .Where(c => fixtureIds.Contains(c.Id))
             .ExecuteDeleteAsync();
         }
-        
+    }
+
+    [Theory]
+    [InlineData("Analyst", HttpStatusCode.Created)]
+    [InlineData("SystemOwner", HttpStatusCode.Forbidden)]
+    [InlineData(null, HttpStatusCode.Unauthorized)]
+    public async Task CreateCase_ReturnsProperAuthorization(string? role, HttpStatusCode expectedStatusCode)
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
+
+        using var client = factory.CreateClient();
+        if (role is not null)
+        {
+            await SignInAsync(client, scope.ServiceProvider, role);
+        }
+
+        string title = $"Day 9 authorization test {Guid.NewGuid()}";
+
+        try
+        {
+            using var response = await client.PostAsJsonAsync("/cases", new { title });
+            Assert.Equal(expectedStatusCode, response.StatusCode);
+
+            bool caseExists = await db.Cases.AnyAsync(c => c.Title == title);
+            Assert.Equal(expectedStatusCode == HttpStatusCode.Created, caseExists);
+        }
+        finally
+        {
+            await db.Cases.Where(c => c.Title == title).ExecuteDeleteAsync();
+        }
     }
 }
