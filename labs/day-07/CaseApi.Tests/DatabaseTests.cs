@@ -211,6 +211,29 @@ public class DatabaseTests
             .Where(c => fixtureIds.Contains(c.Id))
             .ExecuteDeleteAsync();
         }
-        
+    }
+
+    [Fact]
+    public async Task CreateCase_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
+
+        using var client = factory.CreateClient();
+        string title = $"Day 9 anonymous case {Guid.NewGuid()}";
+
+        try
+        {
+            using var response = await client.PostAsJsonAsync("/cases", new { title });
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+        finally
+        {
+            await db.Cases.Where(c => c.Title == title).ExecuteDeleteAsync();
+        }
     }
 }
