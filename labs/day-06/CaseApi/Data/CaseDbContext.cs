@@ -12,6 +12,7 @@ public class CaseDbContext: IdentityDbContext<IdentityUser>
     }
 
     public DbSet<CaseEntity> Cases => Set<CaseEntity>();
+    public DbSet<CaseActivityEntity> CaseActivities => Set<CaseActivityEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -50,6 +51,33 @@ public class CaseDbContext: IdentityDbContext<IdentityUser>
                 "status IN ('New', 'Investigating', 'ClosureRequested', 'Closed')"
             );
         });
+
+        var activity = modelBuilder.Entity<CaseActivityEntity>();
+        activity.ToTable("case_activity", table =>
+        {
+            table.HasCheckConstraint(
+                "activity_message_not_blank",
+                "length(trim(message)) > 0"
+            );
+        });
+
+        activity.HasKey(a => a.Id);
+        activity.Property(a => a.Id)
+            .HasColumnName("id")
+            .IsRequired();
+
+        activity.Property(a => a.CaseId)
+            .HasColumnName("case_id")
+            .IsRequired();
+
+        activity.Property(a => a.Message)
+            .HasColumnName("message")
+            .IsRequired();
+
+        activity.HasOne<CaseEntity>()
+            .WithMany()
+            .HasForeignKey(a => a.CaseId)
+            .OnDelete(DeleteBehavior.Restrict);
 
     }
 }
