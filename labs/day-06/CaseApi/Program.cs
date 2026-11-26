@@ -3,6 +3,8 @@ using CaseApi.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 
+
+
 var builder = WebApplication.CreateBuilder(args);
 string connectionString = 
     builder.Configuration.GetConnectionString("CaseDatabase") 
@@ -19,7 +21,7 @@ builder.Services.AddIdentityApiEndpoints<IdentityUser>()
     .AddEntityFrameworkStores<CaseDbContext>();
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("CanCreateCase", policy =>
+    options.AddPolicy("AnalystOnly", policy =>
         policy.RequireAuthenticatedUser()
         .RequireRole("Analyst"));
 });
@@ -43,7 +45,11 @@ app.MapGet("/cases/count", async (CaseDbContext db) =>
 {
     int count = await db.Cases.CountAsync();
     return Results.Ok(new { count });
-});
+})
+.WithSummary("Returns cases count")
+.RequireAuthorization("AnalystOnly")
+.Produces(StatusCodes.Status403Forbidden)
+.Produces(StatusCodes.Status401Unauthorized);
 
 app.MapGet("/cases", async (CaseDbContext db, string? page, string? pageSize) =>
 {
@@ -86,6 +92,9 @@ app.MapGet("/cases", async (CaseDbContext db, string? page, string? pageSize) =>
     "A valid page beyond the last case returns an empty cases array. " +
     "Invalid pagination values or an offset above 2147483647 return 400."
 )
+.RequireAuthorization("AnalystOnly")
+.Produces(StatusCodes.Status403Forbidden)
+.Produces(StatusCodes.Status401Unauthorized)
 .Produces<CaseResponse>(StatusCodes.Status200OK)
 .Produces<ErrorResponse>(StatusCodes.Status400BadRequest);
 
@@ -121,7 +130,7 @@ app.MapPost("/cases", async(CreateCaseRequest? request, CaseDbContext db) =>
     "the API returns 400 with the error 'Title is required'. " +
     "On success, the API returns 201 with the generated ID, trimmed title, and status 'New'. " +
     "The Location response header contains the URL for retrieving the case.")
-.RequireAuthorization("CanCreateCase")
+.RequireAuthorization("AnalystOnly")
 .Produces(StatusCodes.Status403Forbidden)
 .Produces(StatusCodes.Status401Unauthorized)
 .Produces<CaseResponse>(StatusCodes.Status201Created)
@@ -144,7 +153,47 @@ app.MapGet("/cases/{id}", async (
     }
 
     return Results.Ok(response);
-});
+})
+.WithSummary("Get a single case")
+.WithDescription(
+    "Get a single case identifiable by the given ID. " +
+    "Returns 404 if the case is not found. " +
+    "Returns 200 if the case is found along with the case detail." +
+    "Requires 'Analyst' role.")
+.RequireAuthorization("AnalystOnly")
+.Produces(StatusCodes.Status403Forbidden)
+.Produces(StatusCodes.Status401Unauthorized)
+.Produces<CaseResponse>(StatusCodes.Status200OK)
+.Produces<ErrorResponse>(StatusCodes.Status404NotFound);;
+
+app.MapPost("/cases/{id}/start-investigation", async (string id, CaseDbContext db) =>
+{
+   bool started = await CaseTransitions.StartInvestigationAsync(
+    db, id, "Investigation started."
+   );
+
+   if (started)
+    {
+        return Results.NoContent();
+    }
+
+    bool exists = await db.Cases.AnyAsync(c => c.Id == id);
+    if (!exists)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Conflict(new ErrorResponse(
+        "Only a New case can start an investigation."
+    ));
+})
+.RequireAuthorization("AnalystOnly")
+.WithSummary("Start investigating a new case")
+.Produces(StatusCodes.Status204NoContent)
+.Produces(StatusCodes.Status401Unauthorized)
+.Produces(StatusCodes.Status403Forbidden)
+.Produces(StatusCodes.Status404NotFound)
+.Produces<ErrorResponse>(StatusCodes.Status409Conflict);
 
 app.Run();
 
