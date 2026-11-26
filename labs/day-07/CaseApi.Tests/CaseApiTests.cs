@@ -323,4 +323,124 @@ public class CaseAPITests
         }
     }
 
+    /** Start Investigation test */
+    [Fact]
+    public async Task StartInvestigation_ReturnsNoContentOnFirstCall_ConflictOnSecondCall()
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+
+
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
+
+        string caseId = Guid.NewGuid().ToString();
+
+        db.Cases.Add(new CaseEntity{ Id= caseId, Title="First Case" });
+        await db.SaveChangesAsync();
+
+        try
+        {
+            using var client = factory.CreateClient();
+            await SignInAsync(client, scope.ServiceProvider, "Analyst");
+
+            var statusForCase = db.Cases
+                .Where(c => c.Id == caseId)
+                .Select(c => c.Status);
+
+            Assert.Equal("New", await statusForCase.SingleAsync());
+
+            string url = $"/cases/{caseId}/start-investigation";
+            
+            using var first = await client.PostAsync(url, content: null);
+            Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);
+
+            var activityForCase = db.CaseActivities
+                .Where(a => a.CaseId == caseId)
+                .Select(a => new { a.Id, a.Message });
+
+            
+            
+            var firstActivity = await activityForCase.SingleAsync();
+
+            Assert.Equal("Investigation started.", firstActivity.Message);
+            Assert.Equal("Investigating", await statusForCase.SingleAsync());
+
+            using var second = await client.PostAsync(url, content: null);
+            Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+
+            var activityAfterConflict = await activityForCase.SingleAsync();
+            Assert.Equal(firstActivity.Id, activityAfterConflict.Id);
+            Assert.Equal(firstActivity.Message, activityAfterConflict.Message);
+
+            Assert.Equal("Investigating", await statusForCase.SingleAsync());
+        }
+        finally
+        {
+            await db.CaseActivities.Where(c => c.CaseId == caseId).ExecuteDeleteAsync();
+            await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(null, HttpStatusCode.Unauthorized)]
+    [InlineData("SystemOwner", HttpStatusCode.Forbidden)]
+    [InlineData("Analyst", HttpStatusCode.NoContent)]
+    public async Task StartInvestigation_ApplyProperAuthorization(string? role, HttpStatusCode expectedStatusCode)
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+
+
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
+
+        string caseId = Guid.NewGuid().ToString();
+
+        db.Cases.Add(new CaseEntity{ Id= caseId, Title="First Case" });
+        await db.SaveChangesAsync();
+
+        try
+        {
+            using var client = factory.CreateClient();
+            if (role is not null)
+            {
+                await SignInAsync(client, scope.ServiceProvider, role);
+            }
+
+            var statusForCase = db.Cases
+                .Where(c => c.Id == caseId)
+                .Select(c => c.Status);
+
+            Assert.Equal("New", await statusForCase.SingleAsync());
+
+            string url = $"/cases/{caseId}/start-investigation";
+            
+            using var post = await client.PostAsync(url, content: null);
+            Assert.Equal(expectedStatusCode, post.StatusCode);
+            bool started = expectedStatusCode == HttpStatusCode.NoContent;
+            Assert.Equal(
+                started 
+                ? "Investigating"
+                : "New",
+                await statusForCase.SingleAsync()
+            );
+            
+            Assert.Equal(
+                started
+                ? 1
+                : 0,
+                await db.CaseActivities.CountAsync(a => a.CaseId == caseId)
+            );
+        }
+        finally
+        {
+            await db.CaseActivities.Where(c => c.CaseId == caseId).ExecuteDeleteAsync();
+            await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
+        }
+    }
+
+
 }
