@@ -438,29 +438,6 @@ public class CaseAPITests
             await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
         }
     }
-    
-    private static async Task<DisposableTestCaseActivities> PrepareRequestClosableCase(CaseDbContext db, string title)
-    {
-        var caseId = Guid.NewGuid().ToString();
-        db.Cases.Add(new CaseEntity
-        {
-            Id=caseId,
-            Title=title
-        });
-        await db.SaveChangesAsync();
-        Assert.True(
-            await CaseTransitions
-                .StartInvestigationAsync(db, caseId, "Investigation Started (test).")
-        );
-
-        Assert.Equal("Investigating", 
-            await db.Cases
-                .Where(c => c.Id == caseId)
-                .Select(c => c.Status)
-                .SingleAsync());
-
-        return new DisposableTestCaseActivities(db, caseId);
-    }
 
     /** Request Closure tests */
     [Theory]
@@ -474,28 +451,52 @@ public class CaseAPITests
         using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await using var testCase = await PrepareRequestClosableCase(db, "Repeated login failures");
-        using var client = factory.CreateClient();
-        if (role is not null)
+        var caseId = Guid.NewGuid().ToString();
+        db.Cases.Add(new CaseEntity
         {
-            await SignInAsync(client, scope.ServiceProvider, role);
+            Id=caseId,
+            Title="Repeated login failures"
+        });
+        await db.SaveChangesAsync();
+        try
+        {
+            Assert.True(
+            await CaseTransitions
+                .StartInvestigationAsync(db, caseId, "Investigation Started (test).")
+            );
+
+            Assert.Equal("Investigating", 
+                await db.Cases
+                    .Where(c => c.Id == caseId)
+                    .Select(c => c.Status)
+                    .SingleAsync());
+            using var client = factory.CreateClient();
+            if (role is not null)
+            {
+                await SignInAsync(client, scope.ServiceProvider, role);
+            }
+            string url = $"/cases/{caseId}/request-closure";
+            using var post = await client.PostAsync(url, content: null);
+            Assert.Equal(expectedStatusCode, post.StatusCode);
+            Assert.Equal(role == "Analyst"
+                ? "ClosureRequested"
+                : "Investigating",
+                await db.Cases.Where(c => c.Id == caseId)
+                    .Select(c => c.Status)
+                    .SingleAsync());
+            Assert.Equal(
+                role == "Analyst"
+                ? 2
+                : 1,
+                await db.CaseActivities.CountAsync()
+            );
         }
 
-        string url = $"/cases/{testCase}/start-investigation";
-        using var post = await client.PostAsync(url, content: null);
-        Assert.Equal(expectedStatusCode, post.StatusCode);
-        Assert.Equal(role == "Analyst"
-            ? "CloseRequested"
-            : "Investigating",
-            await db.Cases.Where(c => c.Id == testCase.CaseId)
-                .Select(c => c.Status)
-                .SingleAsync());
-        Assert.Equal(
-            role == "Analyst"
-            ? 2
-            : 1,
-            await db.CaseActivities.CountAsync()
-        );
+        finally
+        {
+            await db.CaseActivities.Where(c => c.CaseId == caseId).ExecuteDeleteAsync();
+            await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
+        }
     }
 
     [Fact]
@@ -505,41 +506,42 @@ public class CaseAPITests
         using var scope = factory.Services.CreateScope();
         using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await using var testCase = await PrepareRequestClosableCase(db, "Repeated login failures");
-        using var client = factory.CreateClient();
-        await SignInAsync(client, scope.ServiceProvider, "Analyst");
-        string url = $"/cases/{testCase}/start-investigation";
-        using var post = await client.PostAsync(url, content: null);
-        Assert.Equal(HttpStatusCode.NoContent, post.StatusCode);
-        Assert.Equal("CloseRequested",
-            await db.Cases.Where(c => c.Id == testCase.CaseId)
-                .Select(c => c.Status)
-                .SingleAsync());
-        Assert.Equal(2,
-            await db.CaseActivities.CountAsync());
-    }
-}
+        var caseId = Guid.NewGuid().ToString();
+        db.Cases.Add(new CaseEntity
+        {
+            Id=caseId,
+            Title="Repeated login failures"
+        });
+        await db.SaveChangesAsync();
+        try
+        {
+            Assert.True(
+            await CaseTransitions
+                .StartInvestigationAsync(db, caseId, "Investigation Started (test).")
+            );
 
-class DisposableTestCases(CaseDbContext db, string caseId) : IAsyncDisposable
-{
-    private readonly string _caseId = caseId;
-    private readonly CaseDbContext _db = db;
+            Assert.Equal("Investigating", 
+                await db.Cases
+                    .Where(c => c.Id == caseId)
+                    .Select(c => c.Status)
+                    .SingleAsync());
+            using var client = factory.CreateClient();
+            await SignInAsync(client, scope.ServiceProvider, "Analyst");
+            string url = $"/cases/{caseId}/request-closure";
+            using var post = await client.PostAsync(url, content: null);
+            Assert.Equal(HttpStatusCode.NoContent, post.StatusCode);
+            Assert.Equal("ClosureRequested",
+                await db.Cases.Where(c => c.Id == caseId)
+                    .Select(c => c.Status)
+                    .SingleAsync());
+            Assert.Equal(2,
+                await db.CaseActivities.CountAsync());
+            }
 
-    public async ValueTask DisposeAsync()
-    {
-        await _db.Cases.Where(c => c.Id == _caseId).ExecuteDeleteAsync();
-    }
-}
-
-class DisposableTestCaseActivities(CaseDbContext db, string caseId): IAsyncDisposable
-{
-
-    public string CaseId = caseId;
-    private readonly CaseDbContext _db = db;
-
-    public async ValueTask DisposeAsync()
-    {
-        await _db.CaseActivities.Where(c => c.CaseId == CaseId).ExecuteDeleteAsync();
-        await _db.Cases.Where(c => c.Id == CaseId).ExecuteDeleteAsync();
+        finally
+        {
+            await db.CaseActivities.Where(c => c.CaseId == caseId).ExecuteDeleteAsync();
+            await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
+        }
     }
 }

@@ -195,6 +195,35 @@ app.MapPost("/cases/{id}/start-investigation", async (string id, CaseDbContext d
 .Produces(StatusCodes.Status404NotFound)
 .Produces<ErrorResponse>(StatusCodes.Status409Conflict);
 
+app.MapPost("/cases/{id}/request-closure", async (string id, CaseDbContext db) =>
+{    
+   bool started = await CaseTransitions.RequestClosure(
+    db, id, "Closure requested."
+   );
+
+   if (started)
+    {
+        return Results.NoContent();
+    }
+
+    bool exists = await db.Cases.AnyAsync(c => c.Id == id);
+    if (!exists)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Conflict(new ErrorResponse(
+        "Only a Investigating case can request for closure."
+    ));
+})
+.RequireAuthorization("AnalystOnly")
+.WithSummary("Request closure on a case that is being actively investigated")
+.Produces(StatusCodes.Status204NoContent)
+.Produces(StatusCodes.Status401Unauthorized)
+.Produces(StatusCodes.Status403Forbidden)
+.Produces(StatusCodes.Status404NotFound)
+.Produces<ErrorResponse>(StatusCodes.Status409Conflict);
+
 app.Run();
 
 public partial class Program
