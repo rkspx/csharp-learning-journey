@@ -451,6 +451,7 @@ public class CaseAPITests
         using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
         var caseId = Guid.NewGuid().ToString();
         db.Cases.Add(new CaseEntity
         {
@@ -488,7 +489,9 @@ public class CaseAPITests
                 role == "Analyst"
                 ? 2
                 : 1,
-                await db.CaseActivities.CountAsync()
+                await db.CaseActivities
+                    .Where(a => a.CaseId == caseId)
+                    .CountAsync()
             );
         }
 
@@ -506,6 +509,7 @@ public class CaseAPITests
         using var scope = factory.Services.CreateScope();
         using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
         var caseId = Guid.NewGuid().ToString();
         db.Cases.Add(new CaseEntity
         {
@@ -535,7 +539,53 @@ public class CaseAPITests
                     .Select(c => c.Status)
                     .SingleAsync());
             Assert.Equal(2,
-                await db.CaseActivities.CountAsync());
+                await db.CaseActivities
+                    .Where(a => a.CaseId == caseId)
+                    .CountAsync());
+            }
+
+        finally
+        {
+            await db.CaseActivities.Where(c => c.CaseId == caseId).ExecuteDeleteAsync();
+            await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("New")]
+    [InlineData("ClosureRequested")]
+    [InlineData("Closed")]
+    public async Task RequestClosure_FromInvalidStatus_ReturnsConflict(string currentStatus)
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
+        var caseId = Guid.NewGuid().ToString();
+        db.Cases.Add(new CaseEntity
+        {
+            Id=caseId,
+            Title="Repeated login failures",
+            Status=currentStatus
+        });
+        await db.SaveChangesAsync();
+
+        try
+        {
+            using var client = factory.CreateClient();
+            await SignInAsync(client, scope.ServiceProvider, "Analyst");
+            string url = $"/cases/{caseId}/request-closure";
+            using var post = await client.PostAsync(url, content: null);
+            Assert.Equal(HttpStatusCode.Conflict, post.StatusCode);
+            Assert.Equal(currentStatus,
+                await db.Cases.Where(c => c.Id == caseId)
+                    .Select(c => c.Status)
+                    .SingleAsync());
+            Assert.Equal(0,
+                await db.CaseActivities
+                    .Where(a => a.CaseId == caseId)
+                    .CountAsync());
             }
 
         finally
