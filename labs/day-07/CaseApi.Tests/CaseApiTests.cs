@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using CaseApi.Data;
+using Microsoft.OpenApi;
 
 namespace CaseApi.Tests;
 [Collection("Case database")]
@@ -60,7 +61,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
@@ -110,7 +111,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
@@ -146,7 +147,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using  var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
@@ -172,8 +173,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
@@ -203,8 +203,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
 
@@ -232,8 +231,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
 
@@ -263,8 +261,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
 
@@ -282,7 +279,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
@@ -329,7 +326,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
@@ -391,7 +388,7 @@ public class CaseAPITests
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
 
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
@@ -427,7 +424,7 @@ public class CaseAPITests
                 : "New",
                 await statusForCase.SingleAsync()
             );
-            
+
             Assert.Equal(
                 started
                 ? 1
@@ -441,6 +438,108 @@ public class CaseAPITests
             await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
         }
     }
+    
+    private static async Task<DisposableTestCaseActivities> PrepareRequestClosableCase(CaseDbContext db, string title)
+    {
+        var caseId = Guid.NewGuid().ToString();
+        db.Cases.Add(new CaseEntity
+        {
+            Id=caseId,
+            Title=title
+        });
+        await db.SaveChangesAsync();
+        Assert.True(
+            await CaseTransitions
+                .StartInvestigationAsync(db, caseId, "Investigation Started (test).")
+        );
 
+        Assert.Equal("Investigating", 
+            await db.Cases
+                .Where(c => c.Id == caseId)
+                .Select(c => c.Status)
+                .SingleAsync());
 
+        return new DisposableTestCaseActivities(db, caseId);
+    }
+
+    /** Request Closure tests */
+    [Theory]
+    [InlineData(null, HttpStatusCode.Unauthorized)]
+    [InlineData("SystemOwner", HttpStatusCode.Forbidden)]
+    [InlineData("Analyst", HttpStatusCode.NoContent)]
+    public async Task RequestClosure_ApplyProperAuthorization(string? role, HttpStatusCode expectedStatusCode)
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await using var testCase = await PrepareRequestClosableCase(db, "Repeated login failures");
+        using var client = factory.CreateClient();
+        if (role is not null)
+        {
+            await SignInAsync(client, scope.ServiceProvider, role);
+        }
+
+        string url = $"/cases/{testCase}/start-investigation";
+        using var post = await client.PostAsync(url, content: null);
+        Assert.Equal(expectedStatusCode, post.StatusCode);
+        Assert.Equal(role == "Analyst"
+            ? "CloseRequested"
+            : "Investigating",
+            await db.Cases.Where(c => c.Id == testCase.CaseId)
+                .Select(c => c.Status)
+                .SingleAsync());
+        Assert.Equal(
+            role == "Analyst"
+            ? 2
+            : 1,
+            await db.CaseActivities.CountAsync()
+        );
+    }
+
+    [Fact]
+    public async Task RequestClosure_ChangesStatusToClosureRequested_AddCaseActivitiesEntry()
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        using var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await using var testCase = await PrepareRequestClosableCase(db, "Repeated login failures");
+        using var client = factory.CreateClient();
+        await SignInAsync(client, scope.ServiceProvider, "Analyst");
+        string url = $"/cases/{testCase}/start-investigation";
+        using var post = await client.PostAsync(url, content: null);
+        Assert.Equal(HttpStatusCode.NoContent, post.StatusCode);
+        Assert.Equal("CloseRequested",
+            await db.Cases.Where(c => c.Id == testCase.CaseId)
+                .Select(c => c.Status)
+                .SingleAsync());
+        Assert.Equal(2,
+            await db.CaseActivities.CountAsync());
+    }
+}
+
+class DisposableTestCases(CaseDbContext db, string caseId) : IAsyncDisposable
+{
+    private readonly string _caseId = caseId;
+    private readonly CaseDbContext _db = db;
+
+    public async ValueTask DisposeAsync()
+    {
+        await _db.Cases.Where(c => c.Id == _caseId).ExecuteDeleteAsync();
+    }
+}
+
+class DisposableTestCaseActivities(CaseDbContext db, string caseId): IAsyncDisposable
+{
+
+    public string CaseId = caseId;
+    private readonly CaseDbContext _db = db;
+
+    public async ValueTask DisposeAsync()
+    {
+        await _db.CaseActivities.Where(c => c.CaseId == CaseId).ExecuteDeleteAsync();
+        await _db.Cases.Where(c => c.Id == CaseId).ExecuteDeleteAsync();
+    }
 }
