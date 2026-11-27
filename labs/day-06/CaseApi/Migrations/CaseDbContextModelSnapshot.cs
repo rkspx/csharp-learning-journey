@@ -22,6 +22,32 @@ namespace CaseApi.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("CaseApi.Data.CaseActivityEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CaseId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("case_id");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("message");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId");
+
+                    b.ToTable("case_activity", null, t =>
+                        {
+                            t.HasCheckConstraint("activity_message_not_blank", "length(trim(message)) > 0");
+                        });
+                });
+
             modelBuilder.Entity("CaseApi.Data.CaseEntity", b =>
                 {
                     b.Property<string>("Id")
@@ -248,6 +274,15 @@ namespace CaseApi.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("CaseApi.Data.CaseActivityEntity", b =>
+                {
+                    b.HasOne("CaseApi.Data.CaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>

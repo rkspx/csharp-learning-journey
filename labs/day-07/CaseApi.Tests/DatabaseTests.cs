@@ -1,59 +1,15 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
-using CaseApi;
 using CaseApi.Data;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace CaseApi.Tests;
 
+[Collection("Case database")]
 public class DatabaseTests
 {
-    private static async Task SignInAsync(HttpClient client, IServiceProvider services, string role)
-    {
-        var roles = services.GetRequiredService<RoleManager<IdentityRole>>();
-        var users = services.GetRequiredService<UserManager<IdentityUser>>();
 
-        if (!await roles.RoleExistsAsync(role))
-        {
-            var result = await roles.CreateAsync(new IdentityRole(role));
-            Assert.True(result.Succeeded, string.Join("; ", result.Errors.Select(e => e.Description)));
-        }
-
-        string email = $"{role.ToLowerInvariant()}@example.text";
-        const string password = "Day9-Local-Test!42";
-        var user = await users.FindByEmailAsync(email);
-
-        if (user is null)
-        {
-            user = new IdentityUser { UserName = email, Email = email };
-            var result = await users.CreateAsync(user, password);
-            Assert.True(result.Succeeded, string.Join("; ", result.Errors.Select(e => e.Description)));            
-        }
-
-        if (!await users.IsInRoleAsync(user, role))
-        {
-            var result = await users.AddToRoleAsync(user, role);
-            Assert.True(result.Succeeded, string.Join("; ", result.Errors.Select(e => e.Description)));
-        }
-
-        using var login = await client.PostAsJsonAsync(
-            "/auth/login?useCookies=false",
-            new {email, password}
-        );
-
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        var body = await login.Content.ReadFromJsonAsync<JsonElement>();
-        string? token = body.GetProperty("accessToken").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(token));
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-    }
-
-    private string _dbName = "case_api_tests";
+    private readonly string _dbName = "case_api_tests";
+    
     [Fact]
     public async Task TestDatabase_AppliesCaseMigrations()
     {
@@ -69,7 +25,7 @@ public class DatabaseTests
     }
 
     [Fact]
-    public async Task CreateCase_FollowLocation_ReturnsSavedCase()
+    public async Task StartInvestigation_WithEmptyMesage_Throws()
     {
         using var factory = new CaseApiFactory();
         using var scope = factory.Services.CreateScope();
@@ -77,216 +33,76 @@ public class DatabaseTests
 
         Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
         await db.Database.MigrateAsync();
+
         using var client = factory.CreateClient();
-        string title = $"Repeated login failures {Guid.NewGuid()}";
+
+        string caseId = Guid.NewGuid().ToString();
+        var cs = await db.AddAsync(new CaseEntity
+        {
+            Id = caseId,
+            Title = "Repeated Login"
+        });
+
+        await db.SaveChangesAsync();
 
         try
         {
-            using var post = await client.PostAsJsonAsync("/cases", new { title });
-            Assert.Equal(HttpStatusCode.Created, post.StatusCode);
-            var created = await post.Content.ReadFromJsonAsync<CaseResponse>();
-            Assert.NotNull(created);
-            Assert.False(string.IsNullOrWhiteSpace(created.Id));
-            Assert.Equal(title, created.Title);
-            Assert.Equal("New", created.Status);
+            await Assert.ThrowsAsync<DbUpdateException>(() =>
+                CaseTransitions.StartInvestigationAsync(db, caseId, ""));
 
-            var location = post.Headers.Location;
-            Assert.NotNull(location);
-
-            using var get = await client.GetAsync(location);
-            Assert.Equal(HttpStatusCode.OK, get.StatusCode);
-            var fetched = await get.Content.ReadFromJsonAsync<CaseResponse>();
-            Assert.Equal(created, fetched);
+            Assert.Equal("New", await db.Cases.Where(c => c.Id == caseId).Select(c => c.Status).SingleAsync());
+            Assert.Equal(0, await db.CaseActivities.CountAsync(a => a.CaseId == caseId));
+        
         }
         finally
-        {
-            await db.Cases
-            .Where(c => c.Title == title)
-            .ExecuteDeleteAsync();
-        }
-    }
-
-    [Fact]
-    public async Task GetCase_WithMissingId_ReturnsNotFound()
-    {
-        using var factory = new CaseApiFactory();
-        using  var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-
-        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await db.Database.MigrateAsync();
-
-        using var client = factory.CreateClient();
-        string missingId = Guid.NewGuid().ToString();
-
-        using var get = await client.GetAsync($"/cases/${missingId}");
-        Assert.Equal(HttpStatusCode.NotFound, get.StatusCode);
-    }
-
-    [Fact]
-    public async Task CreateCase_WithBlankTitle_DoesNotInsertRow()
-    {
-        using var factory = new CaseApiFactory();
-        using var scope = factory.Services.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-
-        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await db.Database.MigrateAsync();
-
-        using var client = factory.CreateClient();
-        int countBefore = await db.Cases.CountAsync();
-
-        using var response = await client.PostAsJsonAsync("/cases", new { title = " "});
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-
-        int countAfter = await db.Cases.CountAsync();
-        Assert.Equal(countBefore, countAfter);
-    }
-
-    [Fact]
-    public async Task GetCases_ReturnsPageOneWithSize()
-    {
-        using var factory = new CaseApiFactory();
-        using var scope = factory.Services.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await db.Database.MigrateAsync();
-
-        using var client = factory.CreateClient();
-        using var get = await client.GetAsync("/cases");
-        Assert.Equal(HttpStatusCode.OK, get.StatusCode);
-        var parsed = await get.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("1", parsed.GetProperty("page").ToString());
-        Assert.Equal("20", parsed.GetProperty("pageSize").ToString());
-        Assert.Equal("[]", parsed.GetProperty("cases").ToString());
-    }
-
-    [Fact]
-    public async Task GetCases_WithPagination_ReturnsProperly()
-    {
-        using var factory = new CaseApiFactory();
-        using var scope = factory.Services.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await db.Database.MigrateAsync();
-
-        using var client = factory.CreateClient();
-        using var get = await client.GetAsync("/cases?page=2&pageSize=5");
-        Assert.Equal(HttpStatusCode.OK, get.StatusCode);
-        var parsed = await get.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("2", parsed.GetProperty("page").ToString());
-        Assert.Equal("5", parsed.GetProperty("pageSize").ToString());
-        Assert.Equal("[]", parsed.GetProperty("cases").ToString());
-    }
-
-    [Theory]
-    [InlineData("-1", "10")]
-    [InlineData("1", "101")]
-    [InlineData("1","-1")]
-    [InlineData("0", "10")]
-    [InlineData("a", "10")]
-    [InlineData("1", "boo")]
-    [InlineData("null", "10")]
-    [InlineData("", "10")]
-    [InlineData("1", "")]
-    [InlineData("1", "null")]
-    [InlineData("1073741825", "5")]
-    public async Task GetCases_WithInvalidPagination_ReturnsBadRequest(string page, string pageSize)
-    {
-        using var factory = new CaseApiFactory();
-        using var scope = factory.Services.CreateScope();
-
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await db.Database.MigrateAsync();
-
-        using var client = factory.CreateClient();
-        using var get = await client.GetAsync($"/cases?page={page}&pageSize={pageSize}");
-        Assert.Equal(HttpStatusCode.BadRequest, get.StatusCode);
-
-        JsonElement body = await get.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("Invalid pagination parameter", body.GetProperty("error").ToString());
-    }
-
-    [Fact]
-    public async Task GetCases_PageTwoWithSizeTwo_ReturnsOnlyThirdCase()
-    {
-        using var factory = new CaseApiFactory();
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-
-        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await db.Database.MigrateAsync();
-
-        string[] fixtureIds = ["case-001", "case-002", "case-003"];
-        try
-        {
-            db.Cases.AddRange(
-                new CaseEntity{ Id = fixtureIds[2], Title = "Third" },
-                new CaseEntity{ Id = fixtureIds[1], Title = "Second" },
-                new CaseEntity{ Id = fixtureIds[0], Title = "First" }
-            );
-
-            await db.SaveChangesAsync();
-
-            using var client = factory.CreateClient();
-            using var get = await client.GetAsync($"/cases?page=2&pageSize=2");
-            Assert.Equal(HttpStatusCode.OK, get.StatusCode);
-
-            CasesResponse? body = await get.Content.ReadFromJsonAsync<CasesResponse>();
-            Assert.NotNull(body);
-
-            Assert.Equal(2, body.Page);
-            Assert.Equal(2, body.PageSize);
-
-            var onlyCase = Assert.Single(body.Cases);
-            Assert.Equal("case-003", onlyCase.Id);
-            Assert.Equal("Third", onlyCase.Title);
-            Assert.Equal("New", onlyCase.Status);
-        }
-        finally
-        {
-            await db.Cases
-            .Where(c => fixtureIds.Contains(c.Id))
-            .ExecuteDeleteAsync();
-        }
-    }
-
-    [Theory]
-    [InlineData("Analyst", HttpStatusCode.Created)]
-    [InlineData("SystemOwner", HttpStatusCode.Forbidden)]
-    [InlineData(null, HttpStatusCode.Unauthorized)]
-    public async Task CreateCase_ReturnsProperAuthorization(string? role, HttpStatusCode expectedStatusCode)
-    {
-        using var factory = new CaseApiFactory();
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
-
-        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
-        await db.Database.MigrateAsync();
-
-        using var client = factory.CreateClient();
-        if (role is not null)
-        {
-            await SignInAsync(client, scope.ServiceProvider, role);
+        {            
+            await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
         }
 
-        string title = $"Day 9 authorization test {Guid.NewGuid()}";
+    }
+
+    [Fact]
+    public async Task StartInvestgation_WithMessage_ChangesStatus_AndAddCaseActivityEntry()
+    {
+        using var factory = new CaseApiFactory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CaseDbContext>();
+
+        Assert.Equal(_dbName, db.Database.GetDbConnection().Database);
+        await db.Database.MigrateAsync();
+
+        using var client = factory.CreateClient();
+
+        string caseId = Guid.NewGuid().ToString();
+        var cs = await db.AddAsync(new CaseEntity
+        {
+            Id = caseId,
+            Title = "Repeated Login"
+        });
+
+        await db.SaveChangesAsync();
 
         try
         {
-            using var response = await client.PostAsJsonAsync("/cases", new { title });
-            Assert.Equal(expectedStatusCode, response.StatusCode);
+            var updated = await CaseTransitions.StartInvestigationAsync(db, caseId, "Case confirmed");
+            Assert.True(updated);
+            var savedStatus = await db.Cases
+                .Where(c => c.Id == caseId)
+                .Select(c => c.Status)
+                .SingleAsync();
+            Assert.Equal("Investigating", savedStatus);
 
-            bool caseExists = await db.Cases.AnyAsync(c => c.Title == title);
-            Assert.Equal(expectedStatusCode == HttpStatusCode.Created, caseExists);
-        }
+            var messages = await db.CaseActivities
+                .Where(a => a.CaseId == caseId)
+                .Select(a => a.Message)
+                .ToListAsync();
+
+            Assert.Equal("Case confirmed", Assert.Single(messages));
+        } 
         finally
         {
-            await db.Cases.Where(c => c.Title == title).ExecuteDeleteAsync();
+            await db.CaseActivities.Where(c => c.CaseId == caseId).ExecuteDeleteAsync();
+            await db.Cases.Where(c => c.Id == caseId).ExecuteDeleteAsync();
         }
     }
 }
